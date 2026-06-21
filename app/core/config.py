@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "TraderOS API"
     app_env: str = "local"
+    database_url: str = "postgresql+psycopg://traderos:traderos@localhost:5432/traderos"
 
     model_config = SettingsConfigDict(
         env_file=".env",
