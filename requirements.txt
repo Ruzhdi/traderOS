@@ -5,6 +5,7 @@ psycopg[binary]
 pydantic-settings
 python-jose[cryptography]
 passlib[bcrypt]
+bcrypt>=4.1.1,<5
 python-multipart
 pytest
 httpx
