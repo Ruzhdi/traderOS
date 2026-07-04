@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     app_name: str = "TraderOS API"
     app_env: str = "local"
     database_url: str = "postgresql+psycopg://traderos:traderos@localhost:5432/traderos"
+    jwt_secret_key: str = "change-me"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
 
     model_config = SettingsConfigDict(
         env_file=".env",
