@@ -39,9 +39,7 @@ def login_user(
     db: Annotated[Session, Depends(get_db)],
 ) -> Token:
     user = get_user_by_email(db, credentials.email)
-    if user is None or not verify_password(
-        credentials.password, user.hashed_password
-    ):
+    if user is None or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
