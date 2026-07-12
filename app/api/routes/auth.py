@@ -3,8 +3,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_current_user
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
+from app.models.user import User
 from app.repositories.user import create_user, get_user_by_email
 from app.schemas.auth import Token, UserLogin
 from app.schemas.user import UserCreate, UserRead
@@ -47,3 +49,10 @@ def login_user(
 
     access_token = create_access_token(str(user.id))
     return Token(access_token=access_token, token_type="bearer")
+
+
+@router.get("/me", response_model=UserRead, status_code=status.HTTP_200_OK)
+def read_current_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserRead:
+    return UserRead.model_validate(current_user)
