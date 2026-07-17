@@ -48,3 +48,17 @@ def update_trade_for_user(
     db.commit()
     db.refresh(trade)
     return trade
+
+
+def delete_trade_for_user(
+    db: Session,
+    trade_id: int,
+    user_id: int,
+) -> bool:
+    trade = get_trade_by_id_for_user(db, trade_id, user_id)
+    if trade is None:
+        return False
+
+    db.delete(trade)
+    db.commit()
+    return True
