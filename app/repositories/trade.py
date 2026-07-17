@@ -31,6 +31,8 @@ def list_trades_by_user(
     side: str | None = None,
     opened_from: datetime | None = None,
     opened_to: datetime | None = None,
+    limit: int = 20,
+    offset: int = 0,
 ) -> list[Trade]:
     statement = select(Trade).where(Trade.user_id == user_id)
 
@@ -47,6 +49,7 @@ def list_trades_by_user(
         statement = statement.where(Trade.opened_at <= opened_to)
 
     statement = statement.order_by(Trade.opened_at.desc(), Trade.id.desc())
+    statement = statement.offset(offset).limit(limit)
     return list(db.scalars(statement))
 
 
