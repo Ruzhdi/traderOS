@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.repositories.trade import (
     create_trade,
+    delete_trade_for_user,
     get_trade_by_id_for_user,
     list_trades_by_user,
     update_trade_for_user,
@@ -72,3 +73,23 @@ def update_trade_for_current_user(
         )
 
     return TradeRead.model_validate(trade)
+
+
+@router.delete("/{trade_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_trade_for_current_user(
+    trade_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Response:
+    deleted = delete_trade_for_user(
+        db,
+        trade_id=trade_id,
+        user_id=current_user.id,
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trade not found",
+        )
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
