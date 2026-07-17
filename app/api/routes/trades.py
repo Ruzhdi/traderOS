@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
@@ -27,6 +27,8 @@ def list_trades_for_current_user(
     side: Side | None = None,
     opened_from: datetime | None = None,
     opened_to: datetime | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[TradeRead]:
     trades = list_trades_by_user(
         db,
@@ -35,6 +37,8 @@ def list_trades_for_current_user(
         side=side,
         opened_from=opened_from,
         opened_to=opened_to,
+        limit=limit,
+        offset=offset,
     )
     return [TradeRead.model_validate(trade) for trade in trades]
 
