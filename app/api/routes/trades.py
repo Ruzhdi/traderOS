@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -13,7 +14,7 @@ from app.repositories.trade import (
     list_trades_by_user,
     update_trade_for_user,
 )
-from app.schemas.trade import TradeCreate, TradeRead, TradeUpdate
+from app.schemas.trade import Side, TradeCreate, TradeRead, TradeUpdate
 
 router = APIRouter(prefix="/trades", tags=["Trades"])
 
@@ -22,8 +23,19 @@ router = APIRouter(prefix="/trades", tags=["Trades"])
 def list_trades_for_current_user(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    symbol: str | None = None,
+    side: Side | None = None,
+    opened_from: datetime | None = None,
+    opened_to: datetime | None = None,
 ) -> list[TradeRead]:
-    trades = list_trades_by_user(db, user_id=current_user.id)
+    trades = list_trades_by_user(
+        db,
+        user_id=current_user.id,
+        symbol=symbol,
+        side=side,
+        opened_from=opened_from,
+        opened_to=opened_to,
+    )
     return [TradeRead.model_validate(trade) for trade in trades]
 
 
