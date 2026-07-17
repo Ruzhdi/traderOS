@@ -10,8 +10,9 @@ from app.repositories.trade import (
     create_trade,
     get_trade_by_id_for_user,
     list_trades_by_user,
+    update_trade_for_user,
 )
-from app.schemas.trade import TradeCreate, TradeRead
+from app.schemas.trade import TradeCreate, TradeRead, TradeUpdate
 
 router = APIRouter(prefix="/trades", tags=["Trades"])
 
@@ -48,4 +49,26 @@ def create_trade_for_current_user(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> TradeRead:
     trade = create_trade(db, user_id=current_user.id, trade_data=trade_data)
+    return TradeRead.model_validate(trade)
+
+
+@router.patch("/{trade_id}", response_model=TradeRead, status_code=status.HTTP_200_OK)
+def update_trade_for_current_user(
+    trade_id: int,
+    trade_data: TradeUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> TradeRead:
+    trade = update_trade_for_user(
+        db,
+        trade_id=trade_id,
+        user_id=current_user.id,
+        trade_data=trade_data,
+    )
+    if trade is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trade not found",
+        )
+
     return TradeRead.model_validate(trade)
