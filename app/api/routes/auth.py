@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
@@ -12,6 +13,26 @@ from app.schemas.auth import Token, UserLogin
 from app.schemas.user import UserCreate, UserRead
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+
+def _raise_invalid_credentials() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid credentials",
+    )
+
+
+def _authenticate_user(db: Session, email: str, password: str) -> User:
+    user = get_user_by_email(db, email)
+    if user is None or not verify_password(password, user.hashed_password):
+        _raise_invalid_credentials()
+
+    return user
+
+
+def _create_token_response(user: User) -> Token:
+    access_token = create_access_token(str(user.id))
+    return Token(access_token=access_token, token_type="bearer")
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -40,15 +61,19 @@ def login_user(
     credentials: UserLogin,
     db: Annotated[Session, Depends(get_db)],
 ) -> Token:
-    user = get_user_by_email(db, credentials.email)
-    if user is None or not verify_password(credentials.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
+    user = _authenticate_user(db, credentials.email, credentials.password)
 
-    access_token = create_access_token(str(user.id))
-    return Token(access_token=access_token, token_type="bearer")
+    return _create_token_response(user)
+
+
+@router.post("/token", response_model=Token, status_code=status.HTTP_200_OK)
+def issue_token(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    db: Annotated[Session, Depends(get_db)],
+) -> Token:
+    user = _authenticate_user(db, form_data.username, form_data.password)
+
+    return _create_token_response(user)
 
 
 @router.get("/me", response_model=UserRead, status_code=status.HTTP_200_OK)

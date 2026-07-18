@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.repositories.user import get_user_by_id
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 
 def _raise_unauthorized() -> NoReturn:
