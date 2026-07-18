@@ -15,6 +15,8 @@ from app.repositories.trade import (
     update_trade_for_user,
 )
 from app.schemas.trade import Side, TradeCreate, TradeRead, TradeUpdate
+from app.schemas.trade_stats import TradeStatsRead
+from app.services.trade_stats import get_trade_stats_summary
 
 router = APIRouter(prefix="/trades", tags=["Trades"])
 
@@ -41,6 +43,29 @@ def list_trades_for_current_user(
         offset=offset,
     )
     return [TradeRead.model_validate(trade) for trade in trades]
+
+
+@router.get(
+    "/stats/summary",
+    response_model=TradeStatsRead,
+    status_code=status.HTTP_200_OK,
+)
+def get_trade_stats_summary_for_current_user(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    symbol: str | None = None,
+    side: Side | None = None,
+    opened_from: datetime | None = None,
+    opened_to: datetime | None = None,
+) -> TradeStatsRead:
+    return get_trade_stats_summary(
+        db,
+        user_id=current_user.id,
+        symbol=symbol,
+        side=side,
+        opened_from=opened_from,
+        opened_to=opened_to,
+    )
 
 
 @router.get("/{trade_id}", response_model=TradeRead, status_code=status.HTTP_200_OK)

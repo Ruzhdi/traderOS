@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.trade import Trade
-from app.schemas.trade import TradeCreate, TradeUpdate
+from app.schemas.trade import Side, TradeCreate, TradeUpdate
 
 
 def create_trade(db: Session, user_id: int, trade_data: TradeCreate) -> Trade:
@@ -50,6 +50,32 @@ def list_trades_by_user(
 
     statement = statement.order_by(Trade.opened_at.desc(), Trade.id.desc())
     statement = statement.offset(offset).limit(limit)
+    return list(db.scalars(statement))
+
+
+def list_trades_for_stats(
+    db: Session,
+    user_id: int,
+    symbol: str | None = None,
+    side: Side | None = None,
+    opened_from: datetime | None = None,
+    opened_to: datetime | None = None,
+) -> list[Trade]:
+    statement = select(Trade).where(Trade.user_id == user_id)
+
+    if symbol is not None:
+        statement = statement.where(Trade.symbol == symbol)
+
+    if side is not None:
+        statement = statement.where(Trade.side == side)
+
+    if opened_from is not None:
+        statement = statement.where(Trade.opened_at >= opened_from)
+
+    if opened_to is not None:
+        statement = statement.where(Trade.opened_at <= opened_to)
+
+    statement = statement.order_by(Trade.opened_at.desc(), Trade.id.desc())
     return list(db.scalars(statement))
 
 
