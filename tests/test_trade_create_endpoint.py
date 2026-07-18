@@ -1,72 +1,9 @@
-from collections.abc import Generator
 from datetime import UTC, datetime
 from decimal import Decimal
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.db.base import Base
-from app.db.session import get_db
-from app.main import app
-
-
-@pytest.fixture
-def client() -> Generator[TestClient]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    Base.metadata.create_all(bind=engine)
-
-    def override_get_db() -> Generator[Session]:
-        db = TestingSessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    with TestClient(app) as test_client:
-        yield test_client
-
-    app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)
-    engine.dispose()
-
-
-def register_and_login(client: TestClient) -> tuple[str, int]:
-    credentials = {"email": "user@example.com", "password": "strongpass"}
-
-    register_response = client.post("/auth/register", json=credentials)
-    assert register_response.status_code == 201
-
-    login_response = client.post("/auth/login", json=credentials)
-    assert login_response.status_code == 200
-
-    return (
-        login_response.json()["access_token"],
-        register_response.json()["id"],
-    )
-
-
-def assert_datetime_equal(actual: str, expected: str) -> None:
-    actual_dt = datetime.fromisoformat(actual)
-    expected_dt = datetime.fromisoformat(expected)
-
-    if actual_dt.tzinfo is None:
-        actual_dt = actual_dt.replace(tzinfo=UTC)
-
-    if expected_dt.tzinfo is None:
-        expected_dt = expected_dt.replace(tzinfo=UTC)
-
-    assert actual_dt == expected_dt
+from tests.helpers import assert_datetime_equal, auth_headers, register_and_login
 
 
 def test_create_trade_returns_created_trade_for_authenticated_user(
@@ -88,7 +25,7 @@ def test_create_trade_returns_created_trade_for_authenticated_user(
     response = client.post(
         "/trades",
         json=payload,
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers=auth_headers(access_token),
     )
 
     response_payload = response.json()
@@ -152,7 +89,7 @@ def test_create_trade_returns_unauthorized_for_invalid_token(
             "quantity": "10",
             "opened_at": datetime(2026, 7, 16, 9, 30, tzinfo=UTC).isoformat(),
         },
-        headers={"Authorization": "Bearer not-a-valid-token"},
+        headers=auth_headers("not-a-valid-token"),
     )
 
     assert response.status_code == 401
@@ -172,7 +109,7 @@ def test_create_trade_returns_validation_error_for_invalid_body(
             "entry_price": "0",
             "quantity": "-1",
         },
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers=auth_headers(access_token),
     )
 
     assert response.status_code == 422
@@ -195,7 +132,7 @@ def test_create_trade_ignores_user_id_from_request_body(client: TestClient) -> N
             "pnl": None,
             "notes": "Opening position.",
         },
-        headers={"Authorization": f"Bearer {access_token}"},
+        headers=auth_headers(access_token),
     )
 
     response_payload = response.json()

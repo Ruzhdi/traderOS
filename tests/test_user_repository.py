@@ -1,36 +1,12 @@
-from collections.abc import Generator
+from sqlalchemy.orm import Session
 
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-
-from app.db.base import Base
 from app.models.user import User
-from app.repositories.user import create_user, get_user_by_email
-
-
-@pytest.fixture
-def db_session() -> Generator[Session]:
-    engine = create_engine("sqlite:///:memory:")
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    Base.metadata.create_all(bind=engine)
-
-    session = TestingSessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
+from app.repositories.user import get_user_by_email
+from tests.helpers import create_user_in_db
 
 
 def test_create_user_creates_a_user(db_session: Session) -> None:
-    user = create_user(
-        db_session,
-        email="user@example.com",
-        hashed_password="already-hashed-password",
-    )
+    user = create_user_in_db(db_session, "user@example.com")
 
     assert isinstance(user, User)
     assert user.id is not None
@@ -39,11 +15,7 @@ def test_create_user_creates_a_user(db_session: Session) -> None:
 
 
 def test_get_user_by_email_returns_existing_user(db_session: Session) -> None:
-    created_user = create_user(
-        db_session,
-        email="user@example.com",
-        hashed_password="already-hashed-password",
-    )
+    created_user = create_user_in_db(db_session, "user@example.com")
 
     found_user = get_user_by_email(db_session, "user@example.com")
 

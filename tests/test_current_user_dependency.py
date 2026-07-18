@@ -6,45 +6,19 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from jose import jwt
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
 from app.core.config import get_settings
 from app.core.security import create_access_token, hash_password
-from app.db.base import Base
 from app.db.session import get_db
 from app.models.user import User
-from app.repositories.user import create_user, get_user_by_id
-
-
-@pytest.fixture
-def db_session() -> Generator[Session]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    Base.metadata.create_all(bind=engine)
-
-    session = TestingSessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
+from app.repositories.user import get_user_by_id
+from tests.helpers import auth_headers, create_user_in_db
 
 
 def test_get_user_by_id_returns_existing_user(db_session: Session) -> None:
-    created_user = create_user(
-        db_session,
-        email="user@example.com",
-        hashed_password="already-hashed-password",
-    )
+    created_user = create_user_in_db(db_session, "user@example.com")
 
     found_user = get_user_by_id(db_session, created_user.id)
 
@@ -60,22 +34,9 @@ def test_get_user_by_id_returns_none_for_missing_user(db_session: Session) -> No
 
 
 @pytest.fixture
-def client() -> Generator[TestClient]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    Base.metadata.create_all(bind=engine)
-
+def client(db_session: Session) -> Generator[TestClient]:
     def override_get_db() -> Generator[Session]:
-        db = TestingSessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+        yield db_session
 
     test_app = FastAPI()
     test_app.dependency_overrides[get_db] = override_get_db
@@ -90,24 +51,14 @@ def client() -> Generator[TestClient]:
         yield test_client
 
     test_app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)
-    engine.dispose()
 
 
-def create_test_user(client: TestClient) -> User:
-    db_generator = client.app.dependency_overrides[get_db]()
-    db = next(db_generator)
-    try:
-        user = User(
-            email="user@example.com",
-            hashed_password=hash_password("strongpass"),
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        return user
-    finally:
-        db_generator.close()
+def create_test_user(db_session: Session) -> User:
+    return create_user_in_db(
+        db_session,
+        "user@example.com",
+        hashed_password=hash_password("strongpass"),
+    )
 
 
 def create_expired_token(subject: str) -> str:
@@ -121,13 +72,14 @@ def create_expired_token(subject: str) -> str:
 
 def test_protected_route_returns_current_user_for_valid_token(
     client: TestClient,
+    db_session: Session,
 ) -> None:
-    user = create_test_user(client)
+    user = create_test_user(db_session)
     token = create_access_token(str(user.id))
 
     response = client.get(
         "/test-protected",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=auth_headers(token),
     )
 
     assert response.status_code == 200
@@ -148,7 +100,7 @@ def test_protected_route_returns_unauthorized_for_invalid_token(
 ) -> None:
     response = client.get(
         "/test-protected",
-        headers={"Authorization": "Bearer not-a-valid-token"},
+        headers=auth_headers("not-a-valid-token"),
     )
 
     assert response.status_code == 401
@@ -162,7 +114,7 @@ def test_protected_route_returns_unauthorized_for_expired_token(
 
     response = client.get(
         "/test-protected",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=auth_headers(token),
     )
 
     assert response.status_code == 401
@@ -181,7 +133,7 @@ def test_protected_route_returns_unauthorized_for_missing_sub_claim(
 
     response = client.get(
         "/test-protected",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=auth_headers(token),
     )
 
     assert response.status_code == 401
@@ -195,7 +147,7 @@ def test_protected_route_returns_unauthorized_for_non_integer_sub(
 
     response = client.get(
         "/test-protected",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=auth_headers(token),
     )
 
     assert response.status_code == 401
@@ -209,7 +161,7 @@ def test_protected_route_returns_unauthorized_for_non_existing_user(
 
     response = client.get(
         "/test-protected",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=auth_headers(token),
     )
 
     assert response.status_code == 401

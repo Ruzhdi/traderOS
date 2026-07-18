@@ -1,45 +1,18 @@
-from collections.abc import Generator
 from datetime import UTC, datetime
 from decimal import Decimal
 
-import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.db.base import Base
 from app.models.trade import Trade
 from app.repositories.trade import create_trade, delete_trade_for_user
-from app.repositories.user import create_user
 from app.schemas.trade import TradeCreate
-
-
-@pytest.fixture
-def db_session() -> Generator[Session]:
-    engine = create_engine("sqlite:///:memory:")
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    Base.metadata.create_all(bind=engine)
-
-    session = TestingSessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
+from tests.helpers import create_user_in_db
 
 
 def test_delete_trade_for_user_deletes_owned_trade(db_session: Session) -> None:
-    owner = create_user(
-        db_session,
-        email="owner@example.com",
-        hashed_password="already-hashed-password",
-    )
-    other_user = create_user(
-        db_session,
-        email="other@example.com",
-        hashed_password="already-hashed-password",
-    )
+    owner = create_user_in_db(db_session, "owner@example.com")
+    other_user = create_user_in_db(db_session, "other@example.com")
     owned_trade = create_trade(
         db_session,
         owner.id,
@@ -81,11 +54,7 @@ def test_delete_trade_for_user_deletes_owned_trade(db_session: Session) -> None:
 def test_delete_trade_for_user_returns_false_for_missing_trade(
     db_session: Session,
 ) -> None:
-    owner = create_user(
-        db_session,
-        email="owner@example.com",
-        hashed_password="already-hashed-password",
-    )
+    owner = create_user_in_db(db_session, "owner@example.com")
 
     deleted = delete_trade_for_user(db_session, trade_id=9999, user_id=owner.id)
 
@@ -95,16 +64,8 @@ def test_delete_trade_for_user_returns_false_for_missing_trade(
 def test_delete_trade_for_user_returns_false_for_other_users_trade(
     db_session: Session,
 ) -> None:
-    owner = create_user(
-        db_session,
-        email="owner@example.com",
-        hashed_password="already-hashed-password",
-    )
-    other_user = create_user(
-        db_session,
-        email="other@example.com",
-        hashed_password="already-hashed-password",
-    )
+    owner = create_user_in_db(db_session, "owner@example.com")
+    other_user = create_user_in_db(db_session, "other@example.com")
     owner_trade = create_trade(
         db_session,
         owner.id,

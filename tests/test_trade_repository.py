@@ -1,44 +1,20 @@
-from collections.abc import Generator
 from datetime import UTC, datetime
 from decimal import Decimal
 
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
-from app.db.base import Base
 from app.models.trade import Trade
 from app.repositories.trade import (
     create_trade,
     get_trade_by_id_for_user,
     list_trades_by_user,
 )
-from app.repositories.user import create_user
 from app.schemas.trade import TradeCreate
-
-
-@pytest.fixture
-def db_session() -> Generator[Session]:
-    engine = create_engine("sqlite:///:memory:")
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    Base.metadata.create_all(bind=engine)
-
-    session = TestingSessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
+from tests.helpers import create_user_in_db, normalize_to_utc
 
 
 def test_create_trade_persists_trade_for_user(db_session: Session) -> None:
-    user = create_user(
-        db_session,
-        email="owner@example.com",
-        hashed_password="already-hashed-password",
-    )
+    user = create_user_in_db(db_session, "owner@example.com")
     trade_data = TradeCreate(
         symbol="AAPL",
         side="long",
@@ -61,9 +37,9 @@ def test_create_trade_persists_trade_for_user(db_session: Session) -> None:
     assert trade.entry_price == Decimal("192.50")
     assert trade.exit_price == Decimal("198.75")
     assert trade.quantity == Decimal("10")
-    assert trade.opened_at.replace(tzinfo=UTC) == trade_data.opened_at
+    assert normalize_to_utc(trade.opened_at) == trade_data.opened_at
     assert trade.closed_at is not None
-    assert trade.closed_at.replace(tzinfo=UTC) == trade_data.closed_at
+    assert normalize_to_utc(trade.closed_at) == trade_data.closed_at
     assert trade.pnl == Decimal("62.50")
     assert trade.notes == "Earnings continuation breakout."
     assert trade.created_at is not None
@@ -71,11 +47,7 @@ def test_create_trade_persists_trade_for_user(db_session: Session) -> None:
 
 
 def test_get_trade_by_id_for_user_returns_trade_for_owner(db_session: Session) -> None:
-    owner = create_user(
-        db_session,
-        email="owner@example.com",
-        hashed_password="already-hashed-password",
-    )
+    owner = create_user_in_db(db_session, "owner@example.com")
     trade = create_trade(
         db_session,
         owner.id,
@@ -102,16 +74,8 @@ def test_get_trade_by_id_for_user_returns_trade_for_owner(db_session: Session) -
 def test_get_trade_by_id_for_user_returns_none_for_other_user(
     db_session: Session,
 ) -> None:
-    owner = create_user(
-        db_session,
-        email="owner@example.com",
-        hashed_password="already-hashed-password",
-    )
-    other_user = create_user(
-        db_session,
-        email="other@example.com",
-        hashed_password="already-hashed-password",
-    )
+    owner = create_user_in_db(db_session, "owner@example.com")
+    other_user = create_user_in_db(db_session, "other@example.com")
     trade = create_trade(
         db_session,
         owner.id,
@@ -134,16 +98,8 @@ def test_get_trade_by_id_for_user_returns_none_for_other_user(
 
 
 def test_list_trades_by_user_returns_only_owned_trades(db_session: Session) -> None:
-    owner = create_user(
-        db_session,
-        email="owner@example.com",
-        hashed_password="already-hashed-password",
-    )
-    other_user = create_user(
-        db_session,
-        email="other@example.com",
-        hashed_password="already-hashed-password",
-    )
+    owner = create_user_in_db(db_session, "owner@example.com")
+    other_user = create_user_in_db(db_session, "other@example.com")
     older_trade = create_trade(
         db_session,
         owner.id,
