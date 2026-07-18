@@ -1,40 +1,15 @@
-from collections.abc import Generator
 from datetime import UTC, datetime
 from decimal import Decimal
 
-import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.db.base import Base
 from app.models.trade import Trade
-from app.models.user import User
-
-
-@pytest.fixture
-def db_session() -> Generator[Session]:
-    engine = create_engine("sqlite:///:memory:")
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    Base.metadata.create_all(bind=engine)
-
-    session = TestingSessionLocal()
-    try:
-        yield session
-    finally:
-        session.close()
-        Base.metadata.drop_all(bind=engine)
-        engine.dispose()
+from tests.helpers import create_user_in_db
 
 
 def test_trade_can_be_created_and_selected_for_a_user(db_session: Session) -> None:
-    user = User(
-        email="trader@example.com",
-        hashed_password="already-hashed-password",
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    user = create_user_in_db(db_session, "trader@example.com")
 
     opened_at = datetime(2026, 7, 16, 9, 30, tzinfo=UTC)
     closed_at = datetime(2026, 7, 16, 15, 45, tzinfo=UTC)

@@ -1,136 +1,23 @@
-from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
-from app.db.base import Base
-from app.db.session import get_db
-from app.main import app
 from app.models.trade import Trade
 from app.models.user import User
-from app.repositories.user import create_user
-
-
-@pytest.fixture
-def client() -> Generator[TestClient]:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    testing_session_local = sessionmaker(
-        autocommit=False,
-        autoflush=False,
-        bind=engine,
-    )
-
-    Base.metadata.create_all(bind=engine)
-
-    def override_get_db() -> Generator[Session]:
-        db = testing_session_local()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    with TestClient(app) as test_client:
-        yield test_client
-
-    app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)
-    engine.dispose()
-
-
-def register_and_login(
-    client: TestClient,
-    email: str = "user@example.com",
-    password: str = "strongpass",
-) -> tuple[str, int]:
-    credentials = {"email": email, "password": password}
-
-    register_response = client.post("/auth/register", json=credentials)
-    assert register_response.status_code == 201
-
-    login_response = client.post("/auth/login", json=credentials)
-    assert login_response.status_code == 200
-
-    return (
-        login_response.json()["access_token"],
-        register_response.json()["id"],
-    )
-
-
-def create_user_in_db(client: TestClient, email: str) -> User:
-    db_generator = client.app.dependency_overrides[get_db]()
-    db = next(db_generator)
-    try:
-        return create_user(
-            db,
-            email=email,
-            hashed_password="already-hashed-password",
-        )
-    finally:
-        db_generator.close()
-
-
-def create_trade_in_db(
-    client: TestClient,
-    *,
-    user_id: int,
-    symbol: str,
-    side: str,
-    entry_price: str,
-    quantity: str,
-    opened_at: datetime,
-    notes: str | None = None,
-) -> Trade:
-    db_generator = client.app.dependency_overrides[get_db]()
-    db = next(db_generator)
-    try:
-        trade = Trade(
-            user_id=user_id,
-            symbol=symbol,
-            side=side,
-            entry_price=Decimal(entry_price),
-            exit_price=None,
-            quantity=Decimal(quantity),
-            opened_at=opened_at,
-            closed_at=None,
-            pnl=None,
-            notes=notes,
-        )
-        db.add(trade)
-        db.commit()
-        db.refresh(trade)
-        return trade
-    finally:
-        db_generator.close()
-
-
-def auth_headers(access_token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {access_token}"}
-
-
-def normalize_to_utc(value: str | datetime) -> datetime:
-    dt = datetime.fromisoformat(value) if isinstance(value, str) else value
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt.astimezone(UTC)
-
-
-def assert_trade_ids(response_payload: list[dict], expected_ids: list[int]) -> None:
-    assert [item["id"] for item in response_payload] == expected_ids
+from tests.helpers import (
+    assert_trade_ids,
+    auth_headers,
+    create_trade_in_db,
+    create_user_in_db,
+    normalize_to_utc,
+    register_and_login,
+)
 
 
 def seed_many_owner_trades(
-    client: TestClient,
+    db_session: Session,
     *,
     user_id: int,
     count: int,
@@ -141,7 +28,7 @@ def seed_many_owner_trades(
     for index in range(count):
         trades.append(
             create_trade_in_db(
-                client,
+                db_session,
                 user_id=user_id,
                 symbol="AAPL",
                 side="long",
@@ -155,13 +42,16 @@ def seed_many_owner_trades(
     return trades
 
 
-def seed_mixed_trades(client: TestClient) -> tuple[str, int, User, list[Trade]]:
+def seed_mixed_trades(
+    client: TestClient,
+    db_session: Session,
+) -> tuple[str, int, User, list[Trade]]:
     access_token, user_id = register_and_login(client)
-    other_user = create_user_in_db(client, "other@example.com")
+    other_user = create_user_in_db(db_session, "other@example.com")
 
     owner_trades = [
         create_trade_in_db(
-            client,
+            db_session,
             user_id=user_id,
             symbol="AAPL",
             side="long",
@@ -171,7 +61,7 @@ def seed_mixed_trades(client: TestClient) -> tuple[str, int, User, list[Trade]]:
             notes="owner-0",
         ),
         create_trade_in_db(
-            client,
+            db_session,
             user_id=user_id,
             symbol="MSFT",
             side="short",
@@ -181,7 +71,7 @@ def seed_mixed_trades(client: TestClient) -> tuple[str, int, User, list[Trade]]:
             notes="owner-1",
         ),
         create_trade_in_db(
-            client,
+            db_session,
             user_id=user_id,
             symbol="AAPL",
             side="short",
@@ -191,7 +81,7 @@ def seed_mixed_trades(client: TestClient) -> tuple[str, int, User, list[Trade]]:
             notes="owner-2",
         ),
         create_trade_in_db(
-            client,
+            db_session,
             user_id=user_id,
             symbol="AAPL",
             side="long",
@@ -201,7 +91,7 @@ def seed_mixed_trades(client: TestClient) -> tuple[str, int, User, list[Trade]]:
             notes="owner-3",
         ),
         create_trade_in_db(
-            client,
+            db_session,
             user_id=user_id,
             symbol="NVDA",
             side="long",
@@ -211,7 +101,7 @@ def seed_mixed_trades(client: TestClient) -> tuple[str, int, User, list[Trade]]:
             notes="owner-4",
         ),
         create_trade_in_db(
-            client,
+            db_session,
             user_id=user_id,
             symbol="AAPL",
             side="short",
@@ -223,7 +113,7 @@ def seed_mixed_trades(client: TestClient) -> tuple[str, int, User, list[Trade]]:
     ]
 
     create_trade_in_db(
-        client,
+        db_session,
         user_id=other_user.id,
         symbol="AAPL",
         side="long",
@@ -238,12 +128,13 @@ def seed_mixed_trades(client: TestClient) -> tuple[str, int, User, list[Trade]]:
 
 def test_list_trades_default_pagination_returns_current_users_trades(
     client: TestClient,
+    db_session: Session,
 ) -> None:
     access_token, user_id = register_and_login(client)
-    other_user = create_user_in_db(client, "other@example.com")
-    owner_trades = seed_many_owner_trades(client, user_id=user_id, count=25)
+    other_user = create_user_in_db(db_session, "other@example.com")
+    owner_trades = seed_many_owner_trades(db_session, user_id=user_id, count=25)
     create_trade_in_db(
-        client,
+        db_session,
         user_id=other_user.id,
         symbol="TSLA",
         side="long",
@@ -269,8 +160,9 @@ def test_list_trades_default_pagination_returns_current_users_trades(
 
 def test_list_trades_limit_restricts_number_of_returned_trades(
     client: TestClient,
+    db_session: Session,
 ) -> None:
-    access_token, _, _, owner_trades = seed_mixed_trades(client)
+    access_token, _, _, owner_trades = seed_mixed_trades(client, db_session)
 
     response = client.get(
         "/trades",
@@ -285,8 +177,11 @@ def test_list_trades_limit_restricts_number_of_returned_trades(
     assert_trade_ids(response_payload, [owner_trades[0].id, owner_trades[1].id])
 
 
-def test_list_trades_offset_skips_earlier_trades(client: TestClient) -> None:
-    access_token, _, _, owner_trades = seed_mixed_trades(client)
+def test_list_trades_offset_skips_earlier_trades(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    access_token, _, _, owner_trades = seed_mixed_trades(client, db_session)
 
     response = client.get(
         "/trades",
@@ -300,8 +195,11 @@ def test_list_trades_offset_skips_earlier_trades(client: TestClient) -> None:
     assert_trade_ids(response_payload, [trade.id for trade in owner_trades[2:]])
 
 
-def test_list_trades_limit_and_offset_work_together(client: TestClient) -> None:
-    access_token, _, _, owner_trades = seed_mixed_trades(client)
+def test_list_trades_limit_and_offset_work_together(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    access_token, _, _, owner_trades = seed_mixed_trades(client, db_session)
 
     response = client.get(
         "/trades",
@@ -317,8 +215,9 @@ def test_list_trades_limit_and_offset_work_together(client: TestClient) -> None:
 
 def test_list_trades_pagination_works_with_symbol_filter(
     client: TestClient,
+    db_session: Session,
 ) -> None:
-    access_token, user_id, _, owner_trades = seed_mixed_trades(client)
+    access_token, user_id, _, owner_trades = seed_mixed_trades(client, db_session)
 
     response = client.get(
         "/trades",
@@ -334,8 +233,11 @@ def test_list_trades_pagination_works_with_symbol_filter(
     assert {item["symbol"] for item in response_payload} == {"AAPL"}
 
 
-def test_list_trades_pagination_works_with_side_filter(client: TestClient) -> None:
-    access_token, user_id, _, owner_trades = seed_mixed_trades(client)
+def test_list_trades_pagination_works_with_side_filter(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    access_token, user_id, _, owner_trades = seed_mixed_trades(client, db_session)
 
     response = client.get(
         "/trades",
@@ -353,8 +255,12 @@ def test_list_trades_pagination_works_with_side_filter(client: TestClient) -> No
 
 def test_list_trades_pagination_never_returns_another_users_trades(
     client: TestClient,
+    db_session: Session,
 ) -> None:
-    access_token, user_id, other_user, owner_trades = seed_mixed_trades(client)
+    access_token, user_id, other_user, owner_trades = seed_mixed_trades(
+        client,
+        db_session,
+    )
 
     response = client.get(
         "/trades",
