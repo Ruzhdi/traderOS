@@ -27,7 +27,9 @@ TraderOS is designed as a portfolio-ready backend for recording and reviewing tr
 - Pagination for trade listing with `limit` and `offset`
 - Trade summary stats for the authenticated user
 - PostgreSQL persistence with SQLAlchemy models and Alembic migrations
-- Local development workflow with Docker Compose, Ruff, and Pytest
+- Host-based and containerized local development workflows
+- Docker Compose for local PostgreSQL and API container orchestration
+- Ruff, Pytest, and GitHub Actions for code quality and CI
 
 ## Architecture Overview
 
@@ -43,7 +45,7 @@ TraderOS uses a straightforward backend layering approach:
 
 At a high level, requests enter FastAPI routes, auth and DB dependencies are resolved, repositories interact with PostgreSQL through SQLAlchemy, and schemas shape the JSON returned to clients.
 
-## Local Setup
+## Host-Based Development Setup
 
 Create and activate a virtual environment, then install dependencies:
 
@@ -74,13 +76,14 @@ The project currently defines these environment variables in `.env.example`:
 
 Notes:
 
-- `DATABASE_URL` should point at the local PostgreSQL instance started by Docker Compose unless you intentionally use another database.
+- Host-based API development uses `localhost` in `DATABASE_URL`, because PostgreSQL is exposed from Docker Compose to the host on `localhost:5432`.
 - `JWT_SECRET_KEY` should be changed from the example value for local development.
 - `UPLOAD_DIR` and `MAX_UPLOAD_SIZE_MB` exist in the example file, but screenshot upload endpoints are not part of the currently implemented API surface.
+- `.env` must not be copied into the Docker image. Container configuration is supplied at runtime through Docker Compose.
 
-## Database Setup with Docker Compose
+## Host-Based Development Workflow
 
-Start PostgreSQL locally with the project’s existing Docker Compose file:
+Start PostgreSQL locally with Docker Compose:
 
 ```bash
 docker compose up -d db
@@ -89,23 +92,13 @@ docker compose ps
 
 The database container runs locally through Docker and exposes PostgreSQL on `localhost:5432`.
 
-To stop the database:
-
-```bash
-docker compose down
-```
-
-## Running Alembic Migrations
-
-Start the database first, then apply migrations:
+Run migrations from the host after the database is healthy:
 
 ```bash
 alembic upgrade head
 ```
 
-## Running the FastAPI App
-
-With the virtual environment active, start the development server with:
+Start the FastAPI development server from the host:
 
 ```bash
 fastapi dev app/main.py
@@ -116,6 +109,83 @@ Once the app is running locally, the main URLs are:
 - API base: `http://127.0.0.1:8000`
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - OpenAPI schema: `http://127.0.0.1:8000/openapi.json`
+
+Stop the local database container when needed:
+
+```bash
+docker compose down
+```
+
+## Containerized Development Workflow
+
+Build the API image:
+
+```bash
+docker compose build api
+```
+
+Start PostgreSQL:
+
+```bash
+docker compose up -d db
+```
+
+Run migrations explicitly through the API image:
+
+```bash
+docker compose run --rm api alembic upgrade head
+```
+
+Start the full stack:
+
+```bash
+docker compose up -d
+```
+
+Check service status:
+
+```bash
+docker compose ps
+```
+
+Inspect logs:
+
+```bash
+docker compose logs api
+docker compose logs db
+```
+
+Check API liveness:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Access Swagger:
+
+```text
+http://localhost:8000/docs
+```
+
+Stop containers:
+
+```bash
+docker compose down
+```
+
+Remove containers and the PostgreSQL volume:
+
+```bash
+docker compose down -v
+```
+
+Container workflow notes:
+
+- The API container uses `db` as the PostgreSQL hostname through `DATABASE_URL=postgresql+psycopg://traderos:traderos@db:5432/traderos`.
+- Configuration is injected at container runtime by Docker Compose rather than baked into the image.
+- `JWT_SECRET_KEY` is passed as a runtime environment value. The Compose fallback is only for local convenience and is not a production-safe secret strategy.
+- The `/health` endpoint is used as a process liveness check only. It does not validate PostgreSQL readiness.
+- Alembic migrations remain intentionally explicit. The API container does not run migrations automatically on startup.
 
 ## Running Linting and Tests
 
@@ -304,9 +374,9 @@ TraderOS is currently an MVP backend. The implemented scope covers:
 - trade filtering by symbol, side, and opened date range
 - trade list pagination
 - summary stats for the authenticated user
-- local PostgreSQL, migrations, linting, tests, and CI setup
+- local PostgreSQL, explicit migrations, linting, tests, CI, and API containerization
 
-This repository does not currently implement a frontend, production deployment, screenshot endpoints, metadata resources, or advanced analytics.
+This repository does not currently implement a frontend, production-complete deployment, screenshot endpoints, metadata resources, or advanced analytics.
 
 ## Future Improvements
 
