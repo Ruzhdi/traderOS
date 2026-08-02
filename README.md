@@ -11,9 +11,11 @@ TraderOS is designed as a portfolio-ready backend for recording and reviewing tr
 - Python
 - FastAPI
 - PostgreSQL
+- Redis
 - SQLAlchemy
 - Alembic
 - Pydantic
+- Celery
 - Pytest
 - Ruff
 - Docker Compose
@@ -27,6 +29,7 @@ TraderOS is designed as a portfolio-ready backend for recording and reviewing tr
 - Pagination for trade listing with `limit` and `offset`
 - Trade summary stats for the authenticated user
 - PostgreSQL persistence with SQLAlchemy models and Alembic migrations
+- Redis-backed Celery worker foundation for background task execution
 - Host-based and containerized local development workflows
 - Docker Compose for local PostgreSQL and API container orchestration
 - Ruff, Pytest, and GitHub Actions for code quality and CI
@@ -42,6 +45,7 @@ TraderOS uses a straightforward backend layering approach:
 - Schemas define request and response contracts.
 - Models define database tables and ORM mappings.
 - Alembic manages schema migrations over time.
+- Celery workers consume background task messages from Redis.
 
 At a high level, requests enter FastAPI routes, auth and DB dependencies are resolved, repositories interact with PostgreSQL through SQLAlchemy, and schemas shape the JSON returned to clients.
 
@@ -71,12 +75,14 @@ The project currently defines these environment variables in `.env.example`:
 - `JWT_SECRET_KEY`
 - `JWT_ALGORITHM`
 - `ACCESS_TOKEN_EXPIRE_MINUTES`
+- `CELERY_BROKER_URL`
 - `UPLOAD_DIR`
 - `MAX_UPLOAD_SIZE_MB`
 
 Notes:
 
 - Host-based API development uses `localhost` in `DATABASE_URL`, because PostgreSQL is exposed from Docker Compose to the host on `localhost:5432`.
+- Host-based processes use `redis://localhost:6379/0` in `CELERY_BROKER_URL`, because Redis is exposed from Docker Compose to the host on `localhost:6379`.
 - `JWT_SECRET_KEY` should be changed from the example value for local development.
 - `UPLOAD_DIR` and `MAX_UPLOAD_SIZE_MB` exist in the example file, but screenshot upload endpoints are not part of the currently implemented API surface.
 - `.env` must not be copied into the Docker image. Container configuration is supplied at runtime through Docker Compose.
@@ -86,11 +92,14 @@ Notes:
 Start PostgreSQL locally with Docker Compose:
 
 ```bash
-docker compose up -d db
+docker compose up -d db redis
 docker compose ps
 ```
 
-The database container runs locally through Docker and exposes PostgreSQL on `localhost:5432`.
+The local infrastructure containers expose:
+
+- PostgreSQL on `localhost:5432`
+- Redis on `localhost:6379`
 
 Run migrations from the host after the database is healthy:
 
@@ -124,10 +133,10 @@ Build the API image:
 docker compose build api
 ```
 
-Start PostgreSQL:
+Start PostgreSQL and Redis:
 
 ```bash
-docker compose up -d db
+docker compose up -d db redis
 ```
 
 Run migrations explicitly through the API image:
@@ -153,6 +162,8 @@ Inspect logs:
 ```bash
 docker compose logs api
 docker compose logs db
+docker compose logs worker
+docker compose logs redis
 ```
 
 Check API liveness:
@@ -182,10 +193,45 @@ docker compose down -v
 Container workflow notes:
 
 - The API container uses `db` as the PostgreSQL hostname through `DATABASE_URL=postgresql+psycopg://traderos:traderos@db:5432/traderos`.
+- Compose services use `redis://redis:6379/0` for `CELERY_BROKER_URL`, while host-based processes use `redis://localhost:6379/0`.
 - Configuration is injected at container runtime by Docker Compose rather than baked into the image.
 - `JWT_SECRET_KEY` is passed as a runtime environment value. The Compose fallback is only for local convenience and is not a production-safe secret strategy.
 - The `/health` endpoint is used as a process liveness check only. It does not validate PostgreSQL readiness.
 - Alembic migrations remain intentionally explicit. The API container does not run migrations automatically on startup.
+- Redis is currently local-development infrastructure for Celery message transport. This setup is not described as production-secure.
+
+## Background Worker Foundation
+
+TraderOS now includes a minimal Celery worker foundation for background jobs:
+
+- Redis is currently used only as the Celery message broker.
+- The API or future internal services publish task messages to Redis.
+- The worker service consumes those messages and executes the registered tasks.
+- Redis is not yet used for caching.
+- A Celery result backend is intentionally not configured.
+- Future product job state should live in PostgreSQL rather than in transient broker state.
+- The verification task is not a public API feature and no HTTP endpoint was added for it.
+
+Current verification flow:
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose exec redis redis-cli ping
+docker compose exec worker \
+  celery -A app.worker.celery_app:celery_app inspect ping
+docker compose exec api python -c \
+  "from app.tasks.system import worker_ping; print(worker_ping.delay().id)"
+docker compose logs worker
+docker compose logs -f worker
+```
+
+Notes:
+
+- The worker uses the existing application image and does not publish any ports.
+- The worker does not run migrations on startup.
+- No public endpoint was created for the verification task.
+- Task messages are limited to JSON serialization only. Pickle is not enabled.
 
 ## Running Linting and Tests
 
@@ -383,6 +429,7 @@ This repository does not currently implement a frontend, production-complete dep
 Possible next steps after the MVP:
 
 - production deployment and environment hardening
+- durable background job workflows and PostgreSQL-backed job tracking
 - screenshot upload and file management endpoints
 - tags, setups, and richer trade classification
 - advanced analytics and richer performance stats
