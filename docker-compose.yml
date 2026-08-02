@@ -8,7 +8,7 @@ services:
       APP_NAME: ${APP_NAME:-TraderOS API}
       APP_ENV: ${APP_ENV:-local}
       DATABASE_URL: ${API_DATABASE_URL:-postgresql+psycopg://traderos:traderos@db:5432/traderos}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CONTAINER_CELERY_BROKER_URL:-redis://redis:6379/0}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
@@ -47,7 +47,7 @@ services:
       APP_NAME: ${APP_NAME:-TraderOS API}
       APP_ENV: ${APP_ENV:-local}
       DATABASE_URL: ${API_DATABASE_URL:-postgresql+psycopg://traderos:traderos@db:5432/traderos}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CONTAINER_CELERY_BROKER_URL:-redis://redis:6379/0}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}

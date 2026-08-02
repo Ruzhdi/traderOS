@@ -76,13 +76,17 @@ The project currently defines these environment variables in `.env.example`:
 - `JWT_ALGORITHM`
 - `ACCESS_TOKEN_EXPIRE_MINUTES`
 - `CELERY_BROKER_URL`
+- `CONTAINER_CELERY_BROKER_URL`
 - `UPLOAD_DIR`
 - `MAX_UPLOAD_SIZE_MB`
 
 Notes:
 
 - Host-based API development uses `localhost` in `DATABASE_URL`, because PostgreSQL is exposed from Docker Compose to the host on `localhost:5432`.
-- Host-based processes use `redis://localhost:6379/0` in `CELERY_BROKER_URL`, because Redis is exposed from Docker Compose to the host on `localhost:6379`.
+- Host-based Python processes use `CELERY_BROKER_URL=redis://localhost:6379/0`, because Redis is exposed from Docker Compose to the host on `localhost:6379`.
+- Docker Compose interpolation uses `CONTAINER_CELERY_BROKER_URL`, which defaults to `redis://redis:6379/0` for container-to-container Redis access.
+- Containers still receive the final broker setting under the application variable name `CELERY_BROKER_URL`.
+- Inside a container, `localhost` refers to that same container. `redis` is the Docker Compose service hostname for the Redis container.
 - `JWT_SECRET_KEY` should be changed from the example value for local development.
 - `UPLOAD_DIR` and `MAX_UPLOAD_SIZE_MB` exist in the example file, but screenshot upload endpoints are not part of the currently implemented API surface.
 - `.env` must not be copied into the Docker image. Container configuration is supplied at runtime through Docker Compose.
@@ -193,7 +197,10 @@ docker compose down -v
 Container workflow notes:
 
 - The API container uses `db` as the PostgreSQL hostname through `DATABASE_URL=postgresql+psycopg://traderos:traderos@db:5432/traderos`.
-- Compose services use `redis://redis:6379/0` for `CELERY_BROKER_URL`, while host-based processes use `redis://localhost:6379/0`.
+- Host-based Python processes use `CELERY_BROKER_URL=redis://localhost:6379/0`.
+- Docker Compose interpolation uses `CONTAINER_CELERY_BROKER_URL`, defaulting to `redis://redis:6379/0`.
+- The resulting value is passed into API and worker containers as `CELERY_BROKER_URL`.
+- Inside containers, `localhost` points to the container itself. `redis` is the Compose service hostname.
 - Configuration is injected at container runtime by Docker Compose rather than baked into the image.
 - `JWT_SECRET_KEY` is passed as a runtime environment value. The Compose fallback is only for local convenience and is not a production-safe secret strategy.
 - The `/health` endpoint is used as a process liveness check only. It does not validate PostgreSQL readiness.
