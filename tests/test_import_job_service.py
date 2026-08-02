@@ -262,6 +262,20 @@ def test_import_job_service_returns_none_for_missing_job(
         )
 
     assert result is None
+    assert db_session.in_transaction() is False
+
+    user = create_user_in_db(db_session, f"missing-{operation}@example.com")
+    import_job = create_import_job(
+        db_session,
+        user_id=user.id,
+        original_filename=f"missing-{operation}.csv",
+        storage_key=f"imports/service/missing-{operation}.csv",
+    )
+
+    persisted_job = get_import_job_by_id(db_session, import_job.id)
+
+    assert persisted_job is not None
+    assert persisted_job.status is ImportJobStatus.PENDING
 
 
 def test_invalid_transition_leaves_persisted_state_unchanged(
@@ -284,6 +298,8 @@ def test_invalid_transition_leaves_persisted_state_unchanged(
             rejected_rows=0,
         )
 
+    assert db_session.in_transaction() is False
+
     persisted_job = get_import_job_by_id(db_session, import_job.id)
 
     assert persisted_job is not None
@@ -294,6 +310,11 @@ def test_invalid_transition_leaves_persisted_state_unchanged(
     assert persisted_job.started_at is None
     assert persisted_job.completed_at is None
     assert persisted_job.failure_message is None
+
+    started_job = start_import_job(db_session, import_job.id)
+
+    assert started_job is not None
+    assert started_job.status is ImportJobStatus.PROCESSING
 
 
 def test_session_remains_usable_after_domain_validation_error(

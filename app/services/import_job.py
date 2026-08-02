@@ -26,11 +26,14 @@ def start_import_job(
 ) -> ImportJob | None:
     import_job = get_import_job_by_id_for_update(db, import_job_id)
     if import_job is None:
+        db.rollback()
         return None
 
     if import_job.status is not ImportJobStatus.PENDING:
+        current_status = import_job.status
+        db.rollback()
         raise InvalidImportJobTransitionError(
-            current_status=import_job.status,
+            current_status=current_status,
             target_status=ImportJobStatus.PROCESSING,
         )
 
@@ -61,11 +64,14 @@ def complete_import_job(
 
     import_job = get_import_job_by_id_for_update(db, import_job_id)
     if import_job is None:
+        db.rollback()
         return None
 
     if import_job.status is not ImportJobStatus.PROCESSING:
+        current_status = import_job.status
+        db.rollback()
         raise InvalidImportJobTransitionError(
-            current_status=import_job.status,
+            current_status=current_status,
             target_status=ImportJobStatus.COMPLETED,
         )
 
@@ -91,14 +97,17 @@ def fail_import_job(
 
     import_job = get_import_job_by_id_for_update(db, import_job_id)
     if import_job is None:
+        db.rollback()
         return None
 
     if import_job.status not in {
         ImportJobStatus.PENDING,
         ImportJobStatus.PROCESSING,
     }:
+        current_status = import_job.status
+        db.rollback()
         raise InvalidImportJobTransitionError(
-            current_status=import_job.status,
+            current_status=current_status,
             target_status=ImportJobStatus.FAILED,
         )
 
