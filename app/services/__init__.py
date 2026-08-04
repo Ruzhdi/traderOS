@@ -12,11 +12,18 @@ from app.services.trade_csv import (
     parse_trade_csv,
 )
 from app.services.trade_import import process_trade_import
+from app.services.trade_import_submission import (
+    InvalidTradeImportFilenameError,
+    TradeImportEnqueueError,
+    submit_trade_import,
+)
 from app.services.trade_stats import get_trade_stats_summary
 
 __all__ = [
     "InvalidImportJobTransitionError",
+    "InvalidTradeImportFilenameError",
     "InvalidTradeCsvHeaderError",
+    "TradeImportEnqueueError",
     "TradeCsvFieldError",
     "TradeCsvParseResult",
     "TradeCsvRowError",
@@ -26,4 +33,5 @@ __all__ = [
     "parse_trade_csv",
     "process_trade_import",
     "start_import_job",
+    "submit_trade_import",
 ]
