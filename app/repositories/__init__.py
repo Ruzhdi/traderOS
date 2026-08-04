@@ -7,6 +7,7 @@ from app.repositories.import_job import (
     save_import_job,
 )
 from app.repositories.trade import (
+    add_trades_for_user,
     create_trade,
     delete_trade_for_user,
     get_trade_by_id_for_user,
@@ -16,6 +17,7 @@ from app.repositories.trade import (
 from app.repositories.user import create_user, get_user_by_email
 
 __all__ = [
+    "add_trades_for_user",
     "create_import_job",
     "create_trade",
     "create_user",
