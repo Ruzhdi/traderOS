@@ -1,5 +1,7 @@
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +13,8 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "change-me"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
+    upload_dir: Path = Path("uploads")
+    max_upload_size_mb: int = Field(default=5, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
