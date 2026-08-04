@@ -1,11 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_import_file_storage
 from app.db.session import get_db
 from app.models.user import User
+from app.repositories import get_import_job_by_id_for_user, list_import_jobs_by_user
 from app.schemas import ImportJobRead
 from app.services import (
     InvalidTradeImportFilenameError,
@@ -16,6 +17,46 @@ from app.storage import ImportFileTooLargeError, LocalImportFileStorage
 from app.tasks import process_trade_import_task
 
 router = APIRouter(prefix="/trade-imports", tags=["Trade Imports"])
+
+
+@router.get("", response_model=list[ImportJobRead], status_code=status.HTTP_200_OK)
+def list_trade_imports_for_current_user(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[ImportJobRead]:
+    import_jobs = list_import_jobs_by_user(
+        db,
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+    )
+    return [ImportJobRead.model_validate(import_job) for import_job in import_jobs]
+
+
+@router.get(
+    "/{import_job_id}",
+    response_model=ImportJobRead,
+    status_code=status.HTTP_200_OK,
+)
+def get_trade_import_for_current_user(
+    import_job_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ImportJobRead:
+    import_job = get_import_job_by_id_for_user(
+        db,
+        import_job_id=import_job_id,
+        user_id=current_user.id,
+    )
+    if import_job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Trade import job not found.",
+        )
+
+    return ImportJobRead.model_validate(import_job)
 
 
 def _enqueue_trade_import(import_job_id: int) -> object:
