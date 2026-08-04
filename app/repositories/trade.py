@@ -1,6 +1,8 @@
+from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.trade import Trade
@@ -13,6 +15,27 @@ def create_trade(db: Session, user_id: int, trade_data: TradeCreate) -> Trade:
     db.commit()
     db.refresh(trade)
     return trade
+
+
+def add_trades_for_user(
+    db: Session,
+    *,
+    user_id: int,
+    trades: Sequence[TradeCreate],
+) -> list[Trade]:
+    if not trades:
+        return []
+
+    staged_trades = [Trade(user_id=user_id, **trade.model_dump()) for trade in trades]
+    db.add_all(staged_trades)
+
+    try:
+        db.flush()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
+
+    return staged_trades
 
 
 def get_trade_by_id_for_user(
