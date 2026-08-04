@@ -103,7 +103,9 @@ def test_create_trade_import_returns_pending_job_and_persists_upload(
                     {
                         "type": "value_error",
                         "loc": ["body", "file"],
-                        "msg": "Value error, Expected UploadFile, received: <class 'str'>",
+                        "msg": (
+                            "Value error, Expected UploadFile, received: <class 'str'>"
+                        ),
                         "input": "symbol,side\nAAPL,long\n",
                         "ctx": {
                             "error": {},
