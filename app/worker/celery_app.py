@@ -7,7 +7,7 @@ settings = get_settings()
 celery_app = Celery(
     "traderos",
     broker=settings.celery_broker_url,
-    include=["app.tasks.system"],
+    include=["app.tasks.system", "app.tasks.imports"],
 )
 
 celery_app.conf.update(
