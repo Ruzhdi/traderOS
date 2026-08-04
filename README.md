@@ -88,7 +88,8 @@ Notes:
 - Containers still receive the final broker setting under the application variable name `CELERY_BROKER_URL`.
 - Inside a container, `localhost` refers to that same container. `redis` is the Docker Compose service hostname for the Redis container.
 - `JWT_SECRET_KEY` should be changed from the example value for local development.
-- `UPLOAD_DIR` and `MAX_UPLOAD_SIZE_MB` exist in the example file, but screenshot upload endpoints are not part of the currently implemented API surface.
+- `UPLOAD_DIR=uploads` is the default host-side root for locally stored import files.
+- `MAX_UPLOAD_SIZE_MB=5` is the default maximum size for a single streamed import file.
 - `.env` must not be copied into the Docker image. Container configuration is supplied at runtime through Docker Compose.
 
 ## Host-Based Development Workflow
@@ -206,6 +207,10 @@ Container workflow notes:
 - The `/health` endpoint is used as a process liveness check only. It does not validate PostgreSQL readiness.
 - Alembic migrations remain intentionally explicit. The API container does not run migrations automatically on startup.
 - Redis is currently local-development infrastructure for Celery message transport. This setup is not described as production-secure.
+- Local import files are stored inside containers at `/app/uploads`.
+- Docker Compose mounts the same named `import_uploads` volume into both the API and worker containers so generated import files are shared across processes.
+- Stored import files use generated keys like `imports/<user_id>/<uuid>.csv`; client filenames are not used for on-disk paths.
+- This local filesystem storage is development infrastructure and can later be replaced with shared object storage.
 
 ## Background Worker Foundation
 
