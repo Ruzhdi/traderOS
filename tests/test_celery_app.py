@@ -53,3 +53,12 @@ def test_dispatch_outbox_events_task_has_stable_name_and_is_registered() -> None
 
     assert dispatch_outbox_events_task.name == task_name
     assert celery_app.tasks[task_name].name == task_name
+
+
+def test_celery_beat_schedules_outbox_dispatch() -> None:
+    schedule_entry = celery_app.conf.beat_schedule["dispatch-outbox-events"]
+
+    assert schedule_entry["task"] == "app.tasks.outbox.dispatch_outbox_events"
+    assert schedule_entry["schedule"] == get_settings().outbox_dispatch_interval_seconds
+    assert schedule_entry["args"] == ()
+    assert schedule_entry["kwargs"] == {}

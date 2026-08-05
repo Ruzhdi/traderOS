@@ -18,4 +18,12 @@ celery_app.conf.update(
     enable_utc=True,
     task_ignore_result=True,
     broker_connection_retry_on_startup=True,
+    beat_schedule={
+        "dispatch-outbox-events": {
+            "task": "app.tasks.outbox.dispatch_outbox_events",
+            "schedule": settings.outbox_dispatch_interval_seconds,
+            "args": (),
+            "kwargs": {},
+        },
+    },
 )
