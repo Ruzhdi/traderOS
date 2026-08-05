@@ -19,12 +19,17 @@ OutboxPublisher = Callable[[dict[str, object]], object]
 SessionFactory = Callable[[], Session]
 
 _UNKNOWN_EVENT_TYPE_MESSAGE = "No publisher is registered for this outbox event type."
+_INVALID_PAYLOAD_MESSAGE = "Outbox event payload is invalid."
 _RETRY_MESSAGE = "Outbox publication failed and will be retried."
 _MAX_ATTEMPTS_MESSAGE = "Outbox publication failed after maximum attempts."
 
 
 class RetryableOutboxPublishError(Exception):
     """Explicitly marks a publication failure as retryable."""
+
+
+class PermanentOutboxPublishError(Exception):
+    """Marks a publication failure as permanent and unsafe to retry."""
 
 
 class UnknownOutboxEventTypeError(LookupError):
@@ -127,6 +132,20 @@ def dispatch_outbox_events(
 
         try:
             publisher(event.payload)
+        except PermanentOutboxPublishError:
+            logger.warning(
+                "Outbox publisher rejected payload: event_id=%s event_type=%s",
+                event.event_id,
+                event.event_type,
+            )
+            _mark_failed(
+                session_factory,
+                event,
+                error_message=_INVALID_PAYLOAD_MESSAGE,
+            )
+            failed_count += 1
+            failures.append(_failure(event, "failed"))
+            continue
         except Exception:
             logger.warning(
                 "Outbox publisher failed: event_id=%s event_type=%s",

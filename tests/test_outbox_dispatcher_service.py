@@ -12,6 +12,7 @@ from app.services.outbox_dispatcher import (
     OutboxDispatchFailure,
     OutboxDispatchResult,
     OutboxEventNotFoundDuringDispatchError,
+    PermanentOutboxPublishError,
     RetryableOutboxPublishError,
     UnknownOutboxEventTypeError,
     dispatch_outbox_events,
@@ -268,6 +269,38 @@ def test_publisher_errors_are_requeued_without_raw_exception_text(
     stored = _stored(db_session, event_id)
     assert stored.status is OutboxEventStatus.PENDING
     assert stored.last_error == "Outbox publication failed and will be retried."
+
+
+def test_permanent_publisher_error_fails_immediately_and_continues(
+    db_session: Session, session_factory: Callable[[], Session]
+) -> None:
+    invalid_id = _event(db_session, "invalid")
+    valid_id = _event(db_session, "valid")
+    published: list[dict[str, object]] = []
+
+    def reject(payload: dict[str, object]) -> None:
+        raise PermanentOutboxPublishError("sensitive validation detail")
+
+    result = dispatch_outbox_events(
+        session_factory,
+        publishers={"invalid": reject, "valid": published.append},
+        batch_size=2,
+        max_attempts=5,
+        now=NOW,
+    )
+
+    assert result == OutboxDispatchResult(
+        2,
+        1,
+        0,
+        1,
+        (OutboxDispatchFailure(invalid_id, "invalid", "failed"),),
+    )
+    invalid = _stored(db_session, invalid_id)
+    assert invalid.status is OutboxEventStatus.FAILED
+    assert invalid.last_error == "Outbox event payload is invalid."
+    assert _stored(db_session, valid_id).status is OutboxEventStatus.PUBLISHED
+    assert len(published) == 1
 
 
 @pytest.mark.parametrize(
