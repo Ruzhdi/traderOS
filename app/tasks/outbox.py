@@ -4,6 +4,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.events.publishers import OUTBOX_PUBLISHERS
 from app.services.outbox_dispatcher import dispatch_outbox_events
+from app.services.outbox_recovery import recover_stale_outbox_events
 from app.worker.celery_app import celery_app
 
 logger = get_task_logger(__name__)
@@ -12,6 +13,25 @@ settings = get_settings()
 
 @celery_app.task(name="app.tasks.outbox.dispatch_outbox_events")
 def dispatch_outbox_events_task() -> None:
+    try:
+        recovery_result = recover_stale_outbox_events(
+            SessionLocal,
+            batch_size=settings.outbox_dispatch_batch_size,
+            max_attempts=settings.outbox_dispatch_max_attempts,
+            processing_timeout_seconds=settings.outbox_processing_timeout_seconds,
+        )
+    except Exception:
+        logger.exception("Outbox recovery failed.")
+        raise
+
+    logger.info(
+        "Outbox recovery completed: recovered_count=%s requeued_count=%s "
+        "failed_count=%s",
+        recovery_result.recovered_count,
+        recovery_result.requeued_count,
+        recovery_result.failed_count,
+    )
+
     try:
         result = dispatch_outbox_events(
             SessionLocal,

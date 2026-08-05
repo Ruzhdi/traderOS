@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -102,6 +102,33 @@ def claim_pending_outbox_events(
 
     _flush_or_rollback(db)
     return events
+
+
+def claim_stale_processing_outbox_events(
+    db: Session,
+    *,
+    limit: int,
+    stale_before: datetime,
+) -> list[OutboxEvent]:
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    if stale_before.tzinfo is None or stale_before.utcoffset() is None:
+        raise ValueError("stale_before must be timezone-aware")
+
+    statement = (
+        select(OutboxEvent)
+        .where(
+            OutboxEvent.status == OutboxEventStatus.PROCESSING,
+            or_(
+                OutboxEvent.claimed_at <= stale_before,
+                OutboxEvent.claimed_at.is_(None),
+            ),
+        )
+        .order_by(OutboxEvent.claimed_at.asc().nulls_first(), OutboxEvent.id.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list(db.scalars(statement))
 
 
 def _get_for_transition(db: Session, event_id: int) -> OutboxEvent | None:
