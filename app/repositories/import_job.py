@@ -11,20 +11,36 @@ def create_import_job(
     original_filename: str,
     storage_key: str,
 ) -> ImportJob:
-    import_job = ImportJob(
-        user_id=user_id,
-        original_filename=original_filename,
-        storage_key=storage_key,
-    )
-    db.add(import_job)
-
     try:
+        import_job = add_import_job(
+            db,
+            user_id=user_id,
+            original_filename=original_filename,
+            storage_key=storage_key,
+        )
         db.commit()
     except SQLAlchemyError:
         db.rollback()
         raise
 
     db.refresh(import_job)
+    return import_job
+
+
+def add_import_job(
+    db: Session,
+    *,
+    user_id: int,
+    original_filename: str,
+    storage_key: str,
+) -> ImportJob:
+    import_job = ImportJob(
+        user_id=user_id,
+        original_filename=original_filename,
+        storage_key=storage_key,
+    )
+    db.add(import_job)
+    db.flush()
     return import_job
 
 
