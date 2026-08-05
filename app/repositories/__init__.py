@@ -1,4 +1,5 @@
 from app.repositories.import_job import (
+    add_import_job,
     create_import_job,
     get_import_job_by_id,
     get_import_job_by_id_for_update,
@@ -25,6 +26,7 @@ from app.repositories.trade import (
 from app.repositories.user import create_user, get_user_by_email
 
 __all__ = [
+    "add_import_job",
     "add_trades_for_user",
     "add_outbox_event",
     "claim_pending_outbox_events",

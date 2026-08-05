@@ -3,26 +3,26 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.import_job import ImportJobStatus
-from app.repositories.import_job import list_import_jobs_by_user
+from app.events import TRADE_IMPORT_REQUESTED_EVENT
+from app.models.import_job import ImportJob, ImportJobStatus
+from app.models.outbox_event import OutboxEvent
 from app.services.trade_import_submission import (
     InvalidTradeImportFilenameError,
-    TradeImportEnqueueError,
     submit_trade_import,
 )
 from app.storage import LocalImportFileStorage
 from tests.helpers import create_user_in_db
 
 
-def test_submit_trade_import_saves_file_creates_job_and_enqueues(
+def test_submit_trade_import_saves_file_and_commits_job_with_outbox_event(
     db_session: Session,
     tmp_path: Path,
 ) -> None:
     user = create_user_in_db(db_session, "submit-success@example.com")
     storage = LocalImportFileStorage(root=tmp_path, max_size_bytes=1024)
-    enqueue_calls: list[int] = []
     payload = b"symbol,side\nAAPL,long\n"
 
     import_job = submit_trade_import(
@@ -31,65 +31,73 @@ def test_submit_trade_import_saves_file_creates_job_and_enqueues(
         original_filename=" reports\\2026\\august.csv ",
         stream=BytesIO(payload),
         storage=storage,
-        enqueue=lambda import_job_id: enqueue_calls.append(import_job_id),
     )
 
+    event = db_session.scalar(select(OutboxEvent))
     assert import_job.id is not None
     assert import_job.user_id == user.id
     assert import_job.status is ImportJobStatus.PENDING
     assert import_job.original_filename == "august.csv"
-    assert enqueue_calls == [import_job.id]
+    assert event is not None
+    assert event.event_type == TRADE_IMPORT_REQUESTED_EVENT
+    assert event.payload == {"import_job_id": import_job.id}
     assert (tmp_path / import_job.storage_key).read_bytes() == payload
 
 
-def test_submit_trade_import_enqueues_only_after_job_commit(
+def test_submit_trade_import_uses_one_commit_for_job_and_event(
     db_session: Session,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = create_user_in_db(db_session, "submit-ordering@example.com")
+    user = create_user_in_db(db_session, "submit-atomic@example.com")
     storage = LocalImportFileStorage(root=tmp_path, max_size_bytes=1024)
-    events: list[str] = []
+    commit_calls = 0
     real_commit = db_session.commit
 
     def record_commit() -> None:
-        events.append("commit")
+        nonlocal commit_calls
+        commit_calls += 1
+        assert len(db_session.new) == 0  # both staging helpers flushed
+        assert db_session.scalar(select(ImportJob)) is not None
+        assert db_session.scalar(select(OutboxEvent)) is not None
         real_commit()
 
     monkeypatch.setattr(db_session, "commit", record_commit)
 
-    def enqueue(import_job_id: int) -> None:
-        events.append(f"enqueue:{import_job_id}")
-
-    import_job = submit_trade_import(
+    submit_trade_import(
         db_session,
         user_id=user.id,
         original_filename="trades.csv",
         stream=BytesIO(b"symbol,side\nMSFT,long\n"),
         storage=storage,
-        enqueue=enqueue,
     )
 
-    assert events == ["commit", f"enqueue:{import_job.id}"]
+    assert commit_calls == 1
 
 
-def test_submit_trade_import_cleans_up_file_and_skips_enqueue_on_db_failure(
+@pytest.mark.parametrize("failing_helper", ["add_import_job", "add_outbox_event"])
+def test_submit_trade_import_rolls_back_and_cleans_file_on_staging_failure(
     db_session: Session,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    failing_helper: str,
 ) -> None:
-    user = create_user_in_db(db_session, "submit-db-failure@example.com")
+    user = create_user_in_db(db_session, f"{failing_helper}@example.com")
     storage = LocalImportFileStorage(root=tmp_path, max_size_bytes=1024)
-    enqueue_calls: list[int] = []
-    original_error = RuntimeError("database write failed")
+    original_error = RuntimeError("database staging failed")
+    rollback_calls = 0
+    real_rollback = db_session.rollback
 
-    def fake_create_import_job(*args, **kwargs):
+    def fail(*args, **kwargs):
         raise original_error
 
-    monkeypatch.setattr(
-        "app.services.trade_import_submission.create_import_job",
-        fake_create_import_job,
-    )
+    def record_rollback() -> None:
+        nonlocal rollback_calls
+        rollback_calls += 1
+        real_rollback()
+
+    monkeypatch.setattr(f"app.services.trade_import_submission.{failing_helper}", fail)
+    monkeypatch.setattr(db_session, "rollback", record_rollback)
 
     with pytest.raises(RuntimeError) as exc_info:
         submit_trade_import(
@@ -98,55 +106,50 @@ def test_submit_trade_import_cleans_up_file_and_skips_enqueue_on_db_failure(
             original_filename="trades.csv",
             stream=BytesIO(b"symbol,side\nTSLA,short\n"),
             storage=storage,
-            enqueue=lambda import_job_id: enqueue_calls.append(import_job_id),
         )
 
     assert exc_info.value is original_error
-    assert enqueue_calls == []
-    assert list_import_jobs_by_user(db_session, user.id) == []
+    assert rollback_calls == 1
+    assert db_session.scalars(select(ImportJob)).all() == []
+    assert db_session.scalars(select(OutboxEvent)).all() == []
     assert not any(path.is_file() for path in tmp_path.rglob("*"))
 
 
-def test_submit_trade_import_marks_failed_cleans_file_and_raises_safe_enqueue_error(
+def test_submit_trade_import_rolls_back_and_cleans_file_on_commit_failure(
     db_session: Session,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = create_user_in_db(db_session, "submit-enqueue-failure@example.com")
+    user = create_user_in_db(db_session, "commit-failure@example.com")
     storage = LocalImportFileStorage(root=tmp_path, max_size_bytes=1024)
-    broker_error = RuntimeError("redis://user:secret@broker:6379/0 unavailable")
+    original_error = RuntimeError("commit failed")
+    monkeypatch.setattr(
+        db_session,
+        "commit",
+        lambda: (_ for _ in ()).throw(original_error),
+    )
 
-    def failing_enqueue(_: int) -> None:
-        raise broker_error
-
-    with pytest.raises(TradeImportEnqueueError) as exc_info:
+    with pytest.raises(RuntimeError) as exc_info:
         submit_trade_import(
             db_session,
             user_id=user.id,
             original_filename="trades.csv",
             stream=BytesIO(b"symbol,side\nNVDA,long\n"),
             storage=storage,
-            enqueue=failing_enqueue,
         )
 
-    jobs = list_import_jobs_by_user(db_session, user.id)
-    assert len(jobs) == 1
-
-    import_job = jobs[0]
-    assert import_job.status is ImportJobStatus.FAILED
-    assert import_job.failure_message == "Import could not be queued for processing."
-    assert (tmp_path / import_job.storage_key).exists() is False
-    assert str(exc_info.value) == "Import could not be queued for processing."
-    assert "redis://" not in str(exc_info.value)
-    assert exc_info.value.__cause__ is broker_error
+    assert exc_info.value is original_error
+    assert db_session.scalars(select(ImportJob)).all() == []
+    assert db_session.scalars(select(OutboxEvent)).all() == []
+    assert not any(path.is_file() for path in tmp_path.rglob("*"))
 
 
 def test_submit_trade_import_rejects_null_byte_filename_before_side_effects(
     db_session: Session,
     tmp_path: Path,
 ) -> None:
-    user = create_user_in_db(db_session, "submit-invalid-filename@example.com")
+    user = create_user_in_db(db_session, "invalid-filename@example.com")
     storage = LocalImportFileStorage(root=tmp_path, max_size_bytes=1024)
-    enqueue_calls: list[int] = []
 
     with pytest.raises(
         InvalidTradeImportFilenameError,
@@ -158,38 +161,27 @@ def test_submit_trade_import_rejects_null_byte_filename_before_side_effects(
             original_filename="bad\x00name.csv",
             stream=BytesIO(b"symbol,side\nAAPL,long\n"),
             storage=storage,
-            enqueue=lambda import_job_id: enqueue_calls.append(import_job_id),
         )
 
-    assert enqueue_calls == []
-    assert list_import_jobs_by_user(db_session, user.id) == []
+    assert db_session.scalars(select(ImportJob)).all() == []
     assert not any(path.is_file() for path in tmp_path.rglob("*"))
 
 
-def test_submit_trade_import_preserves_enqueue_error_when_cleanup_steps_fail(
+def test_submit_trade_import_preserves_db_error_when_file_cleanup_fails(
     db_session: Session,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = create_user_in_db(db_session, "submit-cleanup-failure@example.com")
+    user = create_user_in_db(db_session, "cleanup-failure@example.com")
     storage = LocalImportFileStorage(root=tmp_path, max_size_bytes=1024)
+    original_error = RuntimeError("database failed")
     log_calls: list[tuple[str, tuple[object, ...]]] = []
-    broker_error = RuntimeError("broker unavailable")
-
-    def failing_enqueue(_: int) -> None:
-        raise broker_error
-
-    def fake_fail_import_job(*args, **kwargs):
-        raise RuntimeError("failed to persist failed state")
-
-    def fake_delete(_: str) -> bool:
-        raise OSError("failed to delete stored file")
 
     monkeypatch.setattr(
-        "app.services.trade_import_submission.fail_import_job",
-        fake_fail_import_job,
+        "app.services.trade_import_submission.add_import_job",
+        lambda *args, **kwargs: (_ for _ in ()).throw(original_error),
     )
-    monkeypatch.setattr(storage, "delete", fake_delete)
+    monkeypatch.setattr(storage, "delete", lambda key: (_ for _ in ()).throw(OSError()))
     monkeypatch.setattr(
         "app.services.trade_import_submission.logger",
         SimpleNamespace(
@@ -197,21 +189,16 @@ def test_submit_trade_import_preserves_enqueue_error_when_cleanup_steps_fail(
         ),
     )
 
-    with pytest.raises(TradeImportEnqueueError) as exc_info:
+    with pytest.raises(RuntimeError) as exc_info:
         submit_trade_import(
             db_session,
             user_id=user.id,
             original_filename="trades.csv",
             stream=BytesIO(b"symbol,side\nAMD,long\n"),
             storage=storage,
-            enqueue=failing_enqueue,
         )
 
-    assert exc_info.value.__cause__ is broker_error
-    assert len(log_calls) == 2
+    assert exc_info.value is original_error
     assert log_calls[0][0] == (
-        "Failed to mark trade import job %s as failed after enqueue error."
-    )
-    assert log_calls[1][0] == (
         "Failed to delete stored trade import file %s during cleanup."
     )

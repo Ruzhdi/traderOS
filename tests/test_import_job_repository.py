@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.import_job import ImportJob, ImportJobStatus
 from app.repositories.import_job import (
+    add_import_job,
     create_import_job,
     get_import_job_by_id,
     get_import_job_by_id_for_user,
@@ -11,6 +12,23 @@ from app.repositories.import_job import (
     save_import_job,
 )
 from tests.helpers import create_user_in_db
+
+
+def test_add_import_job_flushes_without_committing_and_can_rollback(
+    db_session: Session,
+) -> None:
+    user = create_user_in_db(db_session, "staged-import@example.com")
+
+    import_job = add_import_job(
+        db_session,
+        user_id=user.id,
+        original_filename="staged.csv",
+        storage_key="imports/staged.csv",
+    )
+
+    assert import_job.id is not None
+    db_session.rollback()
+    assert get_import_job_by_id(db_session, import_job.id) is None
 
 
 def test_create_import_job_persists_defaults(db_session: Session) -> None:

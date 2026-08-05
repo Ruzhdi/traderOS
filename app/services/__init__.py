@@ -24,7 +24,6 @@ from app.services.trade_csv import (
 from app.services.trade_import import process_trade_import
 from app.services.trade_import_submission import (
     InvalidTradeImportFilenameError,
-    TradeImportEnqueueError,
     submit_trade_import,
 )
 from app.services.trade_stats import get_trade_stats_summary
@@ -39,7 +38,6 @@ __all__ = [
     "OutboxPublisher",
     "PermanentOutboxPublishError",
     "RetryableOutboxPublishError",
-    "TradeImportEnqueueError",
     "TradeCsvFieldError",
     "TradeCsvParseResult",
     "TradeCsvRowError",

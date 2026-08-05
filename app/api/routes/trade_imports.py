@@ -10,11 +10,9 @@ from app.repositories import get_import_job_by_id_for_user, list_import_jobs_by_
 from app.schemas import ImportJobRead
 from app.services import (
     InvalidTradeImportFilenameError,
-    TradeImportEnqueueError,
     submit_trade_import,
 )
 from app.storage import ImportFileTooLargeError, LocalImportFileStorage
-from app.tasks import process_trade_import_task
 
 router = APIRouter(prefix="/trade-imports", tags=["Trade Imports"])
 
@@ -59,10 +57,6 @@ def get_trade_import_for_current_user(
     return ImportJobRead.model_validate(import_job)
 
 
-def _enqueue_trade_import(import_job_id: int) -> object:
-    return process_trade_import_task.delay(import_job_id)
-
-
 @router.post("", response_model=ImportJobRead, status_code=status.HTTP_202_ACCEPTED)
 def create_trade_import_for_current_user(
     file: Annotated[UploadFile, File(...)],
@@ -77,7 +71,6 @@ def create_trade_import_for_current_user(
             original_filename=file.filename or "",
             stream=file.file,
             storage=storage,
-            enqueue=_enqueue_trade_import,
         )
     except InvalidTradeImportFilenameError as exc:
         raise HTTPException(
@@ -89,10 +82,4 @@ def create_trade_import_for_current_user(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=str(exc),
         ) from exc
-    except TradeImportEnqueueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
-
     return ImportJobRead.model_validate(import_job)
