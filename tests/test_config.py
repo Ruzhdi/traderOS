@@ -42,6 +42,7 @@ def test_settings_include_outbox_dispatch_defaults() -> None:
     assert settings.outbox_dispatch_interval_seconds == 10
     assert settings.outbox_dispatch_batch_size == 50
     assert settings.outbox_dispatch_max_attempts == 5
+    assert settings.outbox_processing_timeout_seconds == 300
 
 
 def test_settings_read_outbox_dispatch_interval_from_environment(
@@ -60,6 +61,7 @@ def test_settings_read_outbox_dispatch_interval_from_environment(
         "outbox_dispatch_interval_seconds",
         "outbox_dispatch_batch_size",
         "outbox_dispatch_max_attempts",
+        "outbox_processing_timeout_seconds",
     ],
 )
 @pytest.mark.parametrize("invalid_value", [0, -1])

@@ -11,6 +11,7 @@ from app.repositories.outbox_event import (
     InvalidOutboxEventTransitionError,
     add_outbox_event,
     claim_pending_outbox_events,
+    claim_stale_processing_outbox_events,
     mark_outbox_event_failed,
     mark_outbox_event_published,
     requeue_outbox_event,
@@ -118,6 +119,52 @@ def test_claim_changes_can_be_rolled_back(db_session: Session) -> None:
     assert stored.status is OutboxEventStatus.PENDING
     assert stored.attempt_count == 0
     assert stored.claimed_at is None
+
+
+def test_claim_stale_processing_events_filters_orders_and_limits(
+    db_session: Session,
+) -> None:
+    now = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    null_claim = _add_and_commit(db_session, "null-claim", now)
+    oldest = _add_and_commit(db_session, "oldest", now)
+    tied = _add_and_commit(db_session, "tied", now)
+    recent = _add_and_commit(db_session, "recent", now)
+    pending = _add_and_commit(db_session, "pending", now)
+    for event in (null_claim, oldest, tied, recent):
+        event.status = OutboxEventStatus.PROCESSING
+    null_claim.claimed_at = None
+    oldest.claimed_at = now - timedelta(minutes=10)
+    tied.claimed_at = now - timedelta(minutes=5)
+    recent.claimed_at = now - timedelta(seconds=30)
+    db_session.commit()
+
+    claimed = claim_stale_processing_outbox_events(
+        db_session,
+        limit=3,
+        stale_before=now - timedelta(minutes=5),
+    )
+
+    assert [event.id for event in claimed] == [null_claim.id, oldest.id, tied.id]
+    assert recent not in claimed
+    assert pending not in claimed
+    assert all(event.status is OutboxEventStatus.PROCESSING for event in claimed)
+
+
+def test_claim_stale_processing_events_rejects_invalid_arguments(
+    db_session: Session,
+) -> None:
+    with pytest.raises(ValueError, match="limit must be positive"):
+        claim_stale_processing_outbox_events(
+            db_session,
+            limit=0,
+            stale_before=datetime.now(UTC),
+        )
+    with pytest.raises(ValueError, match="stale_before must be timezone-aware"):
+        claim_stale_processing_outbox_events(
+            db_session,
+            limit=1,
+            stale_before=datetime(2026, 8, 4),
+        )
 
 
 def test_processing_event_can_be_marked_published(db_session: Session) -> None:

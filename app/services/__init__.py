@@ -14,6 +14,10 @@ from app.services.outbox_dispatcher import (
     UnknownOutboxEventTypeError,
     dispatch_outbox_events,
 )
+from app.services.outbox_recovery import (
+    OutboxRecoveryResult,
+    recover_stale_outbox_events,
+)
 from app.services.trade_csv import (
     InvalidTradeCsvHeaderError,
     TradeCsvFieldError,
@@ -36,6 +40,7 @@ __all__ = [
     "OutboxDispatchResult",
     "OutboxEventNotFoundDuringDispatchError",
     "OutboxPublisher",
+    "OutboxRecoveryResult",
     "PermanentOutboxPublishError",
     "RetryableOutboxPublishError",
     "TradeCsvFieldError",
@@ -48,6 +53,7 @@ __all__ = [
     "get_trade_stats_summary",
     "parse_trade_csv",
     "process_trade_import",
+    "recover_stale_outbox_events",
     "start_import_job",
     "submit_trade_import",
 ]
