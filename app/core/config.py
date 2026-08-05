@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     upload_dir: Path = Path("uploads")
     max_upload_size_mb: int = Field(default=5, gt=0)
+    outbox_dispatch_batch_size: int = Field(default=50, gt=0)
+    outbox_dispatch_max_attempts: int = Field(default=5, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",

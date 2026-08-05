@@ -1,5 +1,6 @@
 from app.core.config import get_settings
 from app.tasks.imports import process_trade_import_task
+from app.tasks.outbox import dispatch_outbox_events_task
 from app.tasks.system import worker_ping
 from app.worker.celery_app import celery_app
 
@@ -34,6 +35,7 @@ def test_process_trade_import_task_has_stable_name() -> None:
 def test_celery_app_includes_import_tasks_module() -> None:
     assert "app.tasks.system" in celery_app.conf.include
     assert "app.tasks.imports" in celery_app.conf.include
+    assert "app.tasks.outbox" in celery_app.conf.include
 
 
 def test_worker_ping_task_body_returns_pong() -> None:
@@ -44,3 +46,10 @@ def test_celery_app_registers_process_trade_import_task() -> None:
     registered_task = celery_app.tasks["app.tasks.imports.process_trade_import"]
 
     assert registered_task.name == process_trade_import_task.name
+
+
+def test_dispatch_outbox_events_task_has_stable_name_and_is_registered() -> None:
+    task_name = "app.tasks.outbox.dispatch_outbox_events"
+
+    assert dispatch_outbox_events_task.name == task_name
+    assert celery_app.tasks[task_name].name == task_name
