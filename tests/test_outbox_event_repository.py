@@ -10,6 +10,7 @@ from app.repositories.outbox_event import (
     MAX_ERROR_MESSAGE_LENGTH,
     InvalidOutboxEventTransitionError,
     add_outbox_event,
+    claim_expired_terminal_outbox_events,
     claim_pending_outbox_events,
     claim_stale_processing_outbox_events,
     mark_outbox_event_failed,
@@ -158,6 +159,56 @@ def test_claim_stale_processing_events_rejects_invalid_arguments(
             db_session,
             limit=0,
             stale_before=datetime.now(UTC),
+        )
+
+
+def test_claim_expired_terminal_events_orders_limits_and_filters(
+    db_session: Session,
+) -> None:
+    now = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    events = [
+        _add_and_commit(db_session, name, now)
+        for name in ("failed", "published", "recent", "pending", "null-published")
+    ]
+    failed, published, recent, pending, null_published = events
+    failed.status = OutboxEventStatus.FAILED
+    failed.updated_at = now - timedelta(days=40)
+    published.status = OutboxEventStatus.PUBLISHED
+    published.published_at = now - timedelta(days=50)
+    recent.status = OutboxEventStatus.FAILED
+    recent.updated_at = now - timedelta(days=1)
+    null_published.published_at = None
+    db_session.commit()
+
+    claimed = claim_expired_terminal_outbox_events(
+        db_session,
+        limit=2,
+        published_before=now - timedelta(days=7),
+        failed_before=now - timedelta(days=30),
+    )
+
+    assert [event.id for event in claimed] == [published.id, failed.id]
+    assert recent not in claimed
+    assert pending not in claimed
+    assert null_published not in claimed
+
+
+def test_claim_expired_terminal_events_rejects_invalid_arguments(
+    db_session: Session,
+) -> None:
+    aware = datetime(2026, 8, 4, tzinfo=UTC)
+    naive = datetime(2026, 8, 4)
+    with pytest.raises(ValueError, match="limit must be positive"):
+        claim_expired_terminal_outbox_events(
+            db_session, limit=0, published_before=aware, failed_before=aware
+        )
+    with pytest.raises(ValueError, match="published_before must be timezone-aware"):
+        claim_expired_terminal_outbox_events(
+            db_session, limit=1, published_before=naive, failed_before=aware
+        )
+    with pytest.raises(ValueError, match="failed_before must be timezone-aware"):
+        claim_expired_terminal_outbox_events(
+            db_session, limit=1, published_before=aware, failed_before=naive
         )
     with pytest.raises(ValueError, match="stale_before must be timezone-aware"):
         claim_stale_processing_outbox_events(

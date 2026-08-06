@@ -3,6 +3,7 @@ from celery.utils.log import get_task_logger
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.events.publishers import OUTBOX_PUBLISHERS
+from app.services.outbox_cleanup import cleanup_terminal_outbox_events
 from app.services.outbox_dispatcher import dispatch_outbox_events
 from app.services.outbox_recovery import recover_stale_outbox_events
 from app.worker.celery_app import celery_app
@@ -50,4 +51,23 @@ def dispatch_outbox_events_task() -> None:
         result.published_count,
         result.requeued_count,
         result.failed_count,
+    )
+
+    try:
+        cleanup_result = cleanup_terminal_outbox_events(
+            SessionLocal,
+            batch_size=settings.outbox_cleanup_batch_size,
+            published_retention_days=settings.outbox_published_retention_days,
+            failed_retention_days=settings.outbox_failed_retention_days,
+        )
+    except Exception:
+        logger.exception("Outbox cleanup failed.")
+        raise
+
+    logger.info(
+        "Outbox cleanup completed: deleted_count=%s "
+        "published_deleted_count=%s failed_deleted_count=%s",
+        cleanup_result.deleted_count,
+        cleanup_result.published_deleted_count,
+        cleanup_result.failed_deleted_count,
     )

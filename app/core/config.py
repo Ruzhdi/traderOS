@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     outbox_dispatch_batch_size: int = Field(default=50, gt=0)
     outbox_dispatch_max_attempts: int = Field(default=5, gt=0)
     outbox_processing_timeout_seconds: int = Field(default=300, gt=0)
+    outbox_published_retention_days: int = Field(default=7, gt=0)
+    outbox_failed_retention_days: int = Field(default=30, gt=0)
+    outbox_cleanup_batch_size: int = Field(default=500, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
