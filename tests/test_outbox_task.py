@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.services.outbox_cleanup import OutboxCleanupResult
 from app.services.outbox_dispatcher import OutboxDispatchResult
 from app.services.outbox_recovery import OutboxRecoveryResult
 from app.tasks.outbox import dispatch_outbox_events_task
@@ -14,6 +15,7 @@ def test_dispatch_task_uses_config_registry_and_logs_counts(
     publishers = {"event": lambda payload: None}
     result = OutboxDispatchResult(4, 1, 2, 1, ())
     recovery_result = OutboxRecoveryResult(3, 2, 1, (1, 2, 3))
+    cleanup_result = OutboxCleanupResult(3, 2, 1, (4, 5, 6))
     calls: list[tuple[object, object, int, int]] = []
     order: list[str] = []
     info_calls: list[tuple[object, ...]] = []
@@ -45,6 +47,28 @@ def test_dispatch_task_uses_config_registry_and_logs_counts(
         )
         return recovery_result
 
+    def cleanup(
+        factory: object,
+        *,
+        batch_size: int,
+        published_retention_days: int,
+        failed_retention_days: int,
+    ) -> OutboxCleanupResult:
+        order.append("cleanup")
+        cleanup_args = (
+            factory,
+            batch_size,
+            published_retention_days,
+            failed_retention_days,
+        )
+        assert cleanup_args == (
+            session_factory,
+            500,
+            7,
+            30,
+        )
+        return cleanup_result
+
     monkeypatch.setattr("app.tasks.outbox.SessionLocal", session_factory)
     monkeypatch.setattr("app.tasks.outbox.OUTBOX_PUBLISHERS", publishers)
     monkeypatch.setattr(
@@ -53,10 +77,14 @@ def test_dispatch_task_uses_config_registry_and_logs_counts(
             outbox_dispatch_batch_size=50,
             outbox_dispatch_max_attempts=5,
             outbox_processing_timeout_seconds=300,
+            outbox_cleanup_batch_size=500,
+            outbox_published_retention_days=7,
+            outbox_failed_retention_days=30,
         ),
     )
     monkeypatch.setattr("app.tasks.outbox.recover_stale_outbox_events", recover)
     monkeypatch.setattr("app.tasks.outbox.dispatch_outbox_events", dispatch)
+    monkeypatch.setattr("app.tasks.outbox.cleanup_terminal_outbox_events", cleanup)
     monkeypatch.setattr(
         "app.tasks.outbox.logger",
         SimpleNamespace(info=lambda *args: info_calls.append(args)),
@@ -66,7 +94,7 @@ def test_dispatch_task_uses_config_registry_and_logs_counts(
 
     assert task_result is None
     assert calls == [(session_factory, publishers, 50, 5)]
-    assert order == ["recover", "dispatch"]
+    assert order == ["recover", "dispatch", "cleanup"]
     assert info_calls[0][1:] == (3, 2, 1)
     assert info_calls[1][1:] == (4, 1, 2, 1)
     assert all(
@@ -78,6 +106,7 @@ def test_dispatch_task_uses_config_registry_and_logs_counts(
             "failed_count",
         )
     )
+    assert info_calls[2][1:] == (3, 2, 1)
 
 
 def test_dispatch_task_logs_and_reraises_infrastructure_failure(
@@ -105,6 +134,35 @@ def test_dispatch_task_logs_and_reraises_infrastructure_failure(
 
     assert exc_info.value is failure
     assert exception_calls == ["Outbox dispatcher task failed."]
+
+
+def test_dispatch_task_propagates_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = RuntimeError("cleanup failed")
+    exception_calls: list[str] = []
+    monkeypatch.setattr(
+        "app.tasks.outbox.recover_stale_outbox_events",
+        lambda *args, **kwargs: OutboxRecoveryResult(0, 0, 0, ()),
+    )
+    monkeypatch.setattr(
+        "app.tasks.outbox.dispatch_outbox_events",
+        lambda *args, **kwargs: OutboxDispatchResult(0, 0, 0, 0, ()),
+    )
+    monkeypatch.setattr(
+        "app.tasks.outbox.cleanup_terminal_outbox_events",
+        lambda *args, **kwargs: (_ for _ in ()).throw(failure),
+    )
+    monkeypatch.setattr(
+        "app.tasks.outbox.logger",
+        SimpleNamespace(info=lambda *args: None, exception=exception_calls.append),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        dispatch_outbox_events_task()
+
+    assert exc_info.value is failure
+    assert exception_calls == ["Outbox cleanup failed."]
 
 
 def test_dispatch_task_does_not_dispatch_when_recovery_fails(

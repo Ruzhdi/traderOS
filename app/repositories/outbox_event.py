@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -125,6 +125,51 @@ def claim_stale_processing_outbox_events(
             ),
         )
         .order_by(OutboxEvent.claimed_at.asc().nulls_first(), OutboxEvent.id.asc())
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list(db.scalars(statement))
+
+
+def claim_expired_terminal_outbox_events(
+    db: Session,
+    *,
+    limit: int,
+    published_before: datetime,
+    failed_before: datetime,
+) -> list[OutboxEvent]:
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    for name, cutoff in (
+        ("published_before", published_before),
+        ("failed_before", failed_before),
+    ):
+        if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+            raise ValueError(f"{name} must be timezone-aware")
+
+    retention_timestamp = case(
+        (
+            OutboxEvent.status == OutboxEventStatus.PUBLISHED,
+            OutboxEvent.published_at,
+        ),
+        else_=OutboxEvent.updated_at,
+    )
+    statement = (
+        select(OutboxEvent)
+        .where(
+            or_(
+                (
+                    (OutboxEvent.status == OutboxEventStatus.PUBLISHED)
+                    & OutboxEvent.published_at.is_not(None)
+                    & (OutboxEvent.published_at <= published_before)
+                ),
+                (
+                    (OutboxEvent.status == OutboxEventStatus.FAILED)
+                    & (OutboxEvent.updated_at <= failed_before)
+                ),
+            )
+        )
+        .order_by(retention_timestamp.asc(), OutboxEvent.id.asc())
         .limit(limit)
         .with_for_update(skip_locked=True)
     )
